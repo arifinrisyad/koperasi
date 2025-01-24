@@ -1,0 +1,14 @@
+/* resources/css/styles.css */
+h1 {
+    font-size: 2rem;
+    color: #343a40;
+}
+
+.table th, .table td {
+    text-align: center;
+}
+
+.btn-primary {
+    background-color: #007bff;
+    border-color: #007bff;
+}
