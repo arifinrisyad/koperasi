@@ -61,15 +61,19 @@ Route::middleware(['auth'])->group(function () {
 
     // Route Keuangan
     Route::prefix('keuangan')->group(function () {
-        // Basic CRUD routes
+        // Report routes first
+        Route::get('/laporan', [KeuanganController::class, 'laporan'])->name('keuangan.laporan');
+        Route::get('/export-laporan', [KeuanganController::class, 'exportLaporan'])->name('keuangan.export-laporan');
+        Route::get('/export/data', [KeuanganController::class, 'export'])->name('keuangan.export');
+        
+        // Then CRUD routes
         Route::get('/', [KeuanganController::class, 'index'])->name('keuangan.index');
         Route::get('/create', [KeuanganController::class, 'create'])->name('keuangan.create');
         Route::post('/', [KeuanganController::class, 'store'])->name('keuangan.store');
-        Route::get('/{keuangan}', [KeuanganController::class, 'show'])->name('keuangan.show');
         Route::get('/{keuangan}/edit', [KeuanganController::class, 'edit'])->name('keuangan.edit');
         Route::put('/{keuangan}', [KeuanganController::class, 'update'])->name('keuangan.update');
         Route::delete('/{keuangan}', [KeuanganController::class, 'destroy'])->name('keuangan.destroy');
-        Route::get('/export/data', [KeuanganController::class, 'export'])->name('keuangan.export');
+        Route::get('/{keuangan}', [KeuanganController::class, 'show'])->name('keuangan.show');
     });
 
     // Laporan Penjualan Routes

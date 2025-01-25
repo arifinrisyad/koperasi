@@ -382,15 +382,13 @@
         <!-- Sidebar -->
         <div id="sidebar-wrapper">
             <div class="sidebar-heading">
-               
+              
             </div>
             <div class="list-group list-group-flush">
-                <a href="{{ route('dashboard') }}" class="list-group-item list-group-item-action {{ request()->is('dashboard') ? 'active' : '' }}">
-                    <i class="fas fa-home"></i> Dashboard
+                <a href="{{ route('dashboard') }}" class="list-group-item {{ request()->routeIs('dashboard') ? 'active' : '' }}">
+                    <i class="fas fa-tachometer-alt"></i> Dashboard
                 </a>
-
-                <!-- Financial Reports Menu -->
-        
+                
                 @if(auth()->user()->role === 'admin')
                 <a href="{{ route('pembelian.index') }}" class="list-group-item list-group-item-action {{ request()->is('pembelian') ? 'active' : '' }}">
                     <i class="fas fa-cart-plus"></i> Pembelian
@@ -410,7 +408,10 @@
                 </a>
                 <a href="{{ route('keuangan.index') }}" class="list-group-item list-group-item-action {{ request()->is('keuangan*') ? 'active' : '' }}">
                     <i class="fas fa-money-bill"></i> Keuangan
-                </a>        
+                </a>    
+                  <a href="{{ route('keuangan.laporan') }}" class="list-group-item {{ request()->routeIs('keuangan.laporan') ? 'active' : '' }}">
+                    <i class="fas fa-chart-bar"></i> Laporan Keuangan
+                </a>   
                 @if(auth()->user()->role === 'admin')
                 <a href="{{ route('users.index') }}" class="list-group-item list-group-item-action {{ request()->is('users*') ? 'active' : '' }}">
                     <i class="fas fa-users"></i> Users
@@ -418,10 +419,11 @@
                 <a href="{{ route('activity-logs.index') }}" class="list-group-item list-group-item-action {{ request()->is('activity-logs*') ? 'active' : '' }}">
                     <i class="fas fa-history"></i> Log Aktivitas
                 </a>
-                 @endif
+               @endif
+               
                 <form action="{{ route('logout') }}" method="POST" class="d-inline">
                     @csrf
-                    <button type="submit" class="list-group-item list-group-item-action">
+                    <button type="submit" class="list-group-item">
                         <i class="fas fa-sign-out-alt"></i> Logout
                     </button>
                 </form>
@@ -527,16 +529,14 @@
             <!-- Main Content -->
             <div class="container-fluid p-4">
                 @if(session('success'))
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <div class="alert alert-success">
                         {{ session('success') }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                     </div>
                 @endif
 
                 @if(session('error'))
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <div class="alert alert-danger">
                         {{ session('error') }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                     </div>
                 @endif
 
@@ -548,26 +548,17 @@
     <!-- Scripts -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Menu Toggle Script -->
     <script>
-        $(document).ready(function() {
-            $("#menu-toggle").click(function(e) {
-                e.preventDefault();
-                $("#wrapper").toggleClass("toggled");
-            });
-
-            // Auto-expand submenu if current page is in that submenu
-            if (window.location.href.includes('keuangan')) {
-                $('#financialSubmenu').addClass('show');
-            }
-
-            // Add active class to current submenu item
-            $('.list-group-item').each(function() {
-                if ($(this).attr('href') === window.location.href) {
-                    $(this).addClass('active');
-                }
-            });
+        $("#menu-toggle").click(function(e) {
+            e.preventDefault();
+            $("#wrapper").toggleClass("toggled");
         });
     </script>
+
     @stack('scripts')
 </body>
 </html>
