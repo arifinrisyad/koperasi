@@ -380,7 +380,7 @@
 <body>
     <div id="wrapper">
         <!-- Sidebar -->
-        <div id="sidebar-wrapper">
+        <div id="sidebar-wrapper"><br>
             <div class="sidebar-heading">
               
             </div>
@@ -420,7 +420,7 @@
                     <i class="fas fa-history"></i> Log Aktivitas
                 </a>
                @endif
-               
+
                 <form action="{{ route('logout') }}" method="POST" class="d-inline">
                     @csrf
                     <button type="submit" class="list-group-item">

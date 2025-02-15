@@ -227,7 +227,7 @@ class KeuanganController extends Controller
             $sheet->setCellValue('F' . $row, abs($nominal));
             
             // Format angka untuk kolom nominal
-            $sheet->getStyle('F' . $row)->getNumberFormat()->setFormatCode('#,##0');
+            $sheet->getStyle('F' . $row)->getNumberFormat()->setFormatCode('"Rp "#,##0');
             
             // Atur warna text berdasarkan jenis transaksi
             if ($item->jenis === 'Pengeluaran') {
@@ -249,7 +249,7 @@ class KeuanganController extends Controller
         $sheet->setCellValue('E' . $row, 'TOTAL:');
         $sheet->setCellValue('F' . $row, number_format(abs($total), 0, ',', '.'));
         $sheet->getStyle('E' . $row . ':F' . $row)->getFont()->setBold(true);
-        $sheet->getStyle('F' . $row)->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle('F' . $row)->getNumberFormat()->setFormatCode('"Rp "#,##0');
         
         // Atur border untuk total
         $sheet->getStyle('E' . $row . ':F' . $row)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
@@ -319,12 +319,37 @@ class KeuanganController extends Controller
                 ->groupBy('tahun', 'bulan', 'jenis')
                 ->orderBy('tahun')
                 ->orderBy('bulan')
-                ->get()
-                ->groupBy(['tahun', 'bulan']);
+                ->get();
 
-            // Calculate financial ratios
+            // Debug log
+            \Log::info('Trend Bulanan Data:', ['data' => $trendBulanan->toArray()]);
+            
+            $trendBulanan = $trendBulanan->groupBy(['tahun', 'bulan']);
+
+            // Calculate financial metrics
             $currentRatio = $totalPemasukan > 0 ? round($saldoAkhir / $totalPemasukan * 100, 2) : 0;
             $profitMargin = $totalPemasukan > 0 ? round(($totalPemasukan - $totalPengeluaran) / $totalPemasukan * 100, 2) : 0;
+            
+            // Calculate growth rates
+            $previousPeriodQuery = clone $query;
+            if ($request->filled('start_date') && $request->filled('end_date')) {
+                $currentPeriodDays = (strtotime($request->end_date) - strtotime($request->start_date)) / (60 * 60 * 24);
+                $previousStart = date('Y-m-d', strtotime($request->start_date . ' -' . $currentPeriodDays . ' days'));
+                $previousEnd = date('Y-m-d', strtotime($request->start_date . ' -1 day'));
+                
+                $previousPeriodQuery->whereDate('tanggal', '>=', $previousStart)
+                                  ->whereDate('tanggal', '<=', $previousEnd);
+            } else {
+                $previousPeriodQuery->whereDate('tanggal', '<', now()->startOfMonth());
+            }
+
+            $previousPemasukan = $previousPeriodQuery->where('jenis', 'pemasukan')->sum('jumlah');
+            $previousPengeluaran = $previousPeriodQuery->where('jenis', 'pengeluaran')->sum('jumlah');
+
+            $pemasukanGrowth = $previousPemasukan > 0 ? 
+                round((($totalPemasukan - $previousPemasukan) / $previousPemasukan) * 100, 2) : 0;
+            $pengeluaranGrowth = $previousPengeluaran > 0 ? 
+                round((($totalPengeluaran - $previousPengeluaran) / $previousPengeluaran) * 100, 2) : 0;
 
             // Get recent transactions
             $recentTransactions = (clone $query)
@@ -332,8 +357,14 @@ class KeuanganController extends Controller
                 ->limit(10)
                 ->get();
 
-            // Calculate quarter comparisons
+            // Calculate quarterly data
             $quarterlyData = $this->calculateQuarterlyData($query);
+
+            // Calculate daily averages
+            $dailyAverages = $this->calculateDailyAverages($query);
+
+            // Get top categories
+            $topCategories = $this->getTopCategories($query);
             
             return view('keuangan.laporan', compact(
                 'totalPemasukan',
@@ -344,8 +375,12 @@ class KeuanganController extends Controller
                 'trendBulanan',
                 'currentRatio',
                 'profitMargin',
+                'pemasukanGrowth',
+                'pengeluaranGrowth',
                 'recentTransactions',
-                'quarterlyData'
+                'quarterlyData',
+                'dailyAverages',
+                'topCategories'
             ));
         } catch (\Exception $e) {
             \Log::error('Error in laporan method: ' . $e->getMessage());
@@ -356,6 +391,60 @@ class KeuanganController extends Controller
                 'message' => 'Terjadi kesalahan saat memuat laporan keuangan. ' . ($e->getMessage())
             ], 500);
         }
+    }
+
+    private function calculateDailyAverages($query)
+    {
+        $result = [
+            'pemasukan' => 0,
+            'pengeluaran' => 0
+        ];
+
+        try {
+            // Ambil rentang tanggal
+            $dateRange = (clone $query)->selectRaw('MIN(tanggal) as min_date, MAX(tanggal) as max_date')->first();
+            
+            if ($dateRange->min_date && $dateRange->max_date) {
+                // Hitung jumlah hari
+                $days = max(1, Carbon::parse($dateRange->max_date)->diffInDays(Carbon::parse($dateRange->min_date)) + 1);
+                
+                // Hitung total pemasukan dan pengeluaran
+                $totalPemasukan = (clone $query)->where('jenis', 'pemasukan')->sum('jumlah');
+                $totalPengeluaran = (clone $query)->where('jenis', 'pengeluaran')->sum('jumlah');
+                
+                // Hitung rata-rata harian
+                $result['pemasukan'] = $days > 0 ? round($totalPemasukan / $days) : $totalPemasukan;
+                $result['pengeluaran'] = $days > 0 ? round($totalPengeluaran / $days) : $totalPengeluaran;
+            }
+        } catch (\Exception $e) {
+            \Log::error('Error calculating daily averages: ' . $e->getMessage());
+        }
+
+        return $result;
+    }
+
+    private function getTopCategories($query)
+    {
+        $pemasukan = (clone $query)
+            ->where('jenis', 'pemasukan')
+            ->selectRaw('kategori, sum(jumlah) as total')
+            ->groupBy('kategori')
+            ->orderByDesc('total')
+            ->limit(5)
+            ->get();
+
+        $pengeluaran = (clone $query)
+            ->where('jenis', 'pengeluaran')
+            ->selectRaw('kategori, sum(jumlah) as total')
+            ->groupBy('kategori')
+            ->orderByDesc('total')
+            ->limit(5)
+            ->get();
+
+        return [
+            'pemasukan' => $pemasukan,
+            'pengeluaran' => $pengeluaran
+        ];
     }
 
     private function calculateQuarterlyData($query)
@@ -385,63 +474,200 @@ class KeuanganController extends Controller
 
     public function exportLaporan(Request $request)
     {
-        $query = Keuangan::with('user');
-        
-        if ($request->filled('start_date')) {
-            $query->whereDate('tanggal', '>=', $request->start_date);
-        }
-        
-        if ($request->filled('end_date')) {
-            $query->whereDate('tanggal', '<=', $request->end_date);
-        }
+        try {
+            // Base query
+            $query = Keuangan::query();
+            
+            // Apply date filters
+            if ($request->filled('start_date')) {
+                $query->whereDate('tanggal', '>=', $request->start_date);
+            }
+            
+            if ($request->filled('end_date')) {
+                $query->whereDate('tanggal', '<=', $request->end_date);
+            }
 
-        $spreadsheet = new Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
+            // Get all data first
+            $keuangan = $query->orderBy('tanggal')->get();
 
-        // Set headers
-        $sheet->setCellValue('A1', 'LAPORAN KEUANGAN');
-        $sheet->setCellValue('A3', 'Tanggal');
-        $sheet->setCellValue('B3', 'Jenis');
-        $sheet->setCellValue('C3', 'Kategori');
-        $sheet->setCellValue('D3', 'Keterangan');
-        $sheet->setCellValue('E3', 'Jumlah');
+            // Calculate totals (case insensitive)
+            $totalPemasukan = $keuangan->filter(function($item) {
+                return strtolower($item->jenis) === 'pemasukan';
+            })->sum('jumlah') ?? 0;
 
-        $row = 4;
-        foreach ($query->orderBy('tanggal')->get() as $keuangan) {
-            $sheet->setCellValue('A' . $row, $keuangan->tanggal->format('d/m/Y'));
-            $sheet->setCellValue('B' . $row, ucfirst($keuangan->jenis));
-            $sheet->setCellValue('C' . $row, $keuangan->kategori);
-            $sheet->setCellValue('D' . $row, $keuangan->keterangan);
-            $sheet->setCellValue('E' . $row, $keuangan->jumlah);
+            $totalPengeluaran = $keuangan->filter(function($item) {
+                return strtolower($item->jenis) === 'pengeluaran';
+            })->sum('jumlah') ?? 0;
+
+            $saldoAkhir = $totalPemasukan - $totalPengeluaran;
+
+            // Calculate additional metrics
+            $startDate = $request->filled('start_date') ? Carbon::parse($request->start_date) : Carbon::now();
+            $endDate = $request->filled('end_date') ? Carbon::parse($request->end_date) : Carbon::now();
+            $totalDays = max(1, $startDate->diffInDays($endDate) + 1); // Minimal 1 hari
+
+            $profitMargin = $totalPemasukan > 0 ? ($saldoAkhir / $totalPemasukan * 100) : 0;
+            $avgPengeluaranPerHari = $totalPengeluaran / $totalDays;
+            $avgPemasukanPerHari = $totalPemasukan / $totalDays;
+
+            $spreadsheet = new Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+
+            // Set title
+            $sheet->setCellValue('A1', 'LAPORAN KEUANGAN');
+            $sheet->mergeCells('A1:E1');
+            $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+            $sheet->getStyle('A1')->getAlignment()
+                ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+
+            // Set period
+            $periode = 'Periode: ' . $startDate->format('d/m/Y') . ' - ' . $endDate->format('d/m/Y');
+            $sheet->setCellValue('A2', $periode);
+            $sheet->mergeCells('A2:E2');
+            $sheet->getStyle('A2')->getAlignment()
+                ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+
+            // Set headers
+            $headers = ['Tanggal', 'Jenis', 'Kategori', 'Keterangan', 'Jumlah'];
+            foreach ($headers as $key => $header) {
+                $column = chr(65 + $key);
+                $sheet->setCellValue($column . '4', $header);
+                $sheet->getStyle($column . '4')->getFont()->setBold(true);
+                $sheet->getStyle($column . '4')->getFill()
+                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                    ->getStartColor()->setRGB('E2EFDA');
+                $sheet->getStyle($column . '4')->getBorders()
+                    ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+                $sheet->getStyle($column . '4')->getAlignment()
+                    ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+            }
+
+            // Fill data
+            $row = 5;
+            foreach ($keuangan as $item) {
+                $sheet->setCellValue('A' . $row, Carbon::parse($item->tanggal)->format('d/m/Y'));
+                $sheet->setCellValue('B' . $row, ucfirst(strtolower($item->jenis)));
+                $sheet->setCellValue('C' . $row, $item->kategori ?? '-');
+                $sheet->setCellValue('D' . $row, $item->keterangan ?? '-');
+                $sheet->setCellValue('E' . $row, (float)$item->jumlah);
+
+                // Format number
+                $sheet->getStyle('E' . $row)->getNumberFormat()
+                    ->setFormatCode('"Rp "#,##0');
+
+                // Set color based on transaction type
+                $textColor = strtolower($item->jenis) === 'pemasukan' ? '28a745' : 'dc3545';
+                $sheet->getStyle('E' . $row)->getFont()
+                    ->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color($textColor));
+
+                // Add borders
+                $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                    ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+                $row++;
+            }
+
+            // Add summary
+            $row += 2;
+            $sheet->setCellValue('A' . $row, 'RINGKASAN');
+            $sheet->mergeCells('A'.$row.':E'.$row);
+            $sheet->getStyle('A'.$row)->getFont()->setBold(true);
+            $sheet->getStyle('A'.$row.':E'.$row)->getFill()
+                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                ->getStartColor()->setRGB('E2EFDA');
+            $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // Total Pemasukan
             $row++;
+            $sheet->setCellValue('A' . $row, 'Total Pemasukan');
+            $sheet->mergeCells('A'.$row.':D'.$row);
+            $sheet->setCellValue('E' . $row, (float)$totalPemasukan);
+            $sheet->getStyle('E' . $row)->getNumberFormat()
+                ->setFormatCode('"Rp "#,##0');
+            $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // Total Pengeluaran
+            $row++;
+            $sheet->setCellValue('A' . $row, 'Total Pengeluaran');
+            $sheet->mergeCells('A'.$row.':D'.$row);
+            $sheet->setCellValue('E' . $row, (float)$totalPengeluaran);
+            $sheet->getStyle('E' . $row)->getNumberFormat()
+                ->setFormatCode('"Rp "#,##0');
+            $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // Saldo Akhir
+            $row++;
+            $sheet->setCellValue('A' . $row, 'Saldo Akhir');
+            $sheet->mergeCells('A'.$row.':D'.$row);
+            $sheet->setCellValue('E' . $row, (float)$saldoAkhir);
+            $sheet->getStyle('E' . $row)->getNumberFormat()
+                ->setFormatCode('"Rp "#,##0');
+            $sheet->getStyle('A'.$row.':E'.$row)->getFont()->setBold(true);
+            $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // Add empty row
+            $row += 2;
+
+            // Add profit margin
+            $row++;
+            $sheet->setCellValue('A' . $row, 'Profit Margin (%)');
+            $sheet->mergeCells('A'.$row.':D'.$row);
+            $sheet->setCellValue('E' . $row, (float)$profitMargin);
+            $sheet->getStyle('E' . $row)->getNumberFormat()
+                ->setFormatCode('0.00"%"');
+            $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // Add average expenses per day
+            $row++;
+            $sheet->setCellValue('A' . $row, 'Rata-rata Pengeluaran per Hari');
+            $sheet->mergeCells('A'.$row.':D'.$row);
+            $sheet->setCellValue('E' . $row, (float)$avgPengeluaranPerHari);
+            $sheet->getStyle('E' . $row)->getNumberFormat()
+                ->setFormatCode('"Rp "#,##0');
+            $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // Add average income per day
+            $row++;
+            $sheet->setCellValue('A' . $row, 'Rata-rata Pemasukan per Hari');
+            $sheet->mergeCells('A'.$row.':D'.$row);
+            $sheet->setCellValue('E' . $row, (float)$avgPemasukanPerHari);
+            $sheet->getStyle('E' . $row)->getNumberFormat()
+                ->setFormatCode('"Rp "#,##0');
+            $sheet->getStyle('A'.$row.':E'.$row)->getBorders()
+                ->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // Set column width
+            foreach (range('A', 'E') as $column) {
+                $sheet->getColumnDimension($column)->setAutoSize(true);
+            }
+
+            // Create Excel file
+            $writer = new Xlsx($spreadsheet);
+            $filename = 'Laporan_Keuangan_' . date('Y-m-d_H-i-s') . '.xlsx';
+
+            ob_end_clean(); // Clear any previous output
+            ob_start(); // Start output buffering
+
+            $writer->save('php://output');
+            $content = ob_get_contents(); // Get the contents
+            ob_end_clean(); // Clear the buffer
+
+            return response($content)
+                ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                ->header('Content-Disposition', 'attachment; filename="'.$filename.'"')
+                ->header('Content-Length', strlen($content))
+                ->header('Cache-Control', 'max-age=0');
+
+        } catch (\Exception $e) {
+            \Log::error('Excel Export Error: ' . $e->getMessage());
+            \Log::error($e->getTraceAsString());
+            return back()->with('error', 'Terjadi kesalahan saat mengexport laporan: ' . $e->getMessage());
         }
-
-        // Add summary
-        $row += 2;
-        $sheet->setCellValue('A' . $row, 'RINGKASAN');
-        $row++;
-        $sheet->setCellValue('A' . $row, 'Total Pemasukan');
-        $sheet->setCellValue('E' . $row, $query->where('jenis', 'pemasukan')->sum('jumlah'));
-        $row++;
-        $sheet->setCellValue('A' . $row, 'Total Pengeluaran');
-        $sheet->setCellValue('E' . $row, $query->where('jenis', 'pengeluaran')->sum('jumlah'));
-
-        // Style the spreadsheet
-        $sheet->getStyle('A1:E1')->getFont()->setBold(true);
-        $sheet->getStyle('A3:E3')->getFont()->setBold(true);
-        $sheet->getColumnDimension('A')->setWidth(15);
-        $sheet->getColumnDimension('B')->setWidth(15);
-        $sheet->getColumnDimension('C')->setWidth(20);
-        $sheet->getColumnDimension('D')->setWidth(30);
-        $sheet->getColumnDimension('E')->setWidth(15);
-
-        $writer = new Xlsx($spreadsheet);
-        $filename = 'laporan-keuangan-' . date('Y-m-d') . '.xlsx';
-        
-        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        header('Content-Disposition: attachment;filename="' . $filename . '"');
-        header('Cache-Control: max-age=0');
-        
-        $writer->save('php://output');
     }
 }

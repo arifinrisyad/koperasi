@@ -36,17 +36,26 @@ class PetugasController extends Controller
             ->take(5)
             ->get();
             
-        // Get daily sales chart data for the last 7 days
+        // Get monthly sales data for the current year
         $salesData = Penjualan::select(
-            DB::raw('DATE(created_at) as date'),
+            DB::raw('MONTH(created_at) as month'),
+            DB::raw('YEAR(created_at) as year'),
             DB::raw('COUNT(*) as total_sales'),
             DB::raw('SUM(total_harga) as total_revenue')
         )
-        ->groupBy('date')
-        ->orderBy('date', 'DESC')
-        ->take(7)
+        ->whereYear('created_at', date('Y'))
+        ->groupBy('year', 'month')
+        ->orderBy('year', 'ASC')
+        ->orderBy('month', 'ASC')
         ->get()
-        ->reverse();
+        ->map(function ($item) {
+            $monthName = date('F', mktime(0, 0, 0, $item->month, 1));
+            return [
+                'date' => $monthName,
+                'total_sales' => $item->total_sales,
+                'total_revenue' => $item->total_revenue
+            ];
+        });
         
         return view('petugas.dashboard', compact(
             'totalPembelian',

@@ -131,4 +131,8 @@ Route::middleware(['auth'])->group(function () {
     });
 
     Route::get('/report/generate', [ReportController::class, 'generateReport'])->name('report.generate');
+
+    // Keuangan Routes
+    Route::get('/keuangan/laporan', [KeuanganController::class, 'laporan'])->name('keuangan.laporan');
+    Route::get('/keuangan/export-laporan', [KeuanganController::class, 'exportLaporan'])->name('keuangan.export-laporan');
 });
